@@ -179,7 +179,7 @@ dependencies = [
 
 [[package]]
 name = "elevenlabs_stt"
-version = "0.0.6"
+version = "0.1.0"
 dependencies = [
  "chrono",
  "reqwest",
