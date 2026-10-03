@@ -10,19 +10,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Creating ElevenLabs client
     let client = ElevenLabsSTTClient::new(api_key);
 
-    // Get audio file bytes
+    // Path to the audio file (streaming from disk, no need to load into memory)
     let file_path = "inputs/speech.mp3";
-    let file_content = std::fs::read(file_path)?;
 
     // Run speech to text execution
     let stt_reponse: STTResponse = client
-        .speech_to_text(file_content)
+        .speech_to_text(file_path)
         .model(models::elevanlabs_models::SCRIBE_V1)
         .language_code("en")
         .tag_audio_events(true)
         .timestamps_granularity("word")
         .diarize(true)
-        .diarization_threshold(0.22)
+        .diarization_threshold(0.22_f32)
         .webhook(false)
         .webhook(false)
         .temperature(0.2)

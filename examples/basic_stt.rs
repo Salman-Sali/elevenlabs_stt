@@ -13,12 +13,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Test Basic STT with new voice API
     println!("Converting speech to text started ...");
 
-    // Get audio file bytes
+    // Path to the audio file (streaming from disk, no need to load into memory)
     let file_path = "inputs/speech.mp3";
-    let file_content = std::fs::read(file_path)?;
 
     // Run speech to text execution
-    let stt_reponse: STTResponse = client.speech_to_text(file_content).execute().await?;
+    let stt_reponse: STTResponse = client.speech_to_text(file_path).execute().await?;
 
     // Handle response
     println!("Results: {:?}", stt_reponse);

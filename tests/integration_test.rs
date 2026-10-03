@@ -11,12 +11,11 @@ async fn test_client_creation() {
 async fn test_builder_pattern() {
     let client = ElevenLabsSTTClient::new("test-key");
 
-    // Get audio file bytes
+    // Path to audio file (streaming from disk)
     let file_path = "inputs/speech.mp3";
-    let file_content = std::fs::read(file_path).unwrap();
 
     let _builder = client
-        .speech_to_text(file_content)
+        .speech_to_text(file_path)
         .model(models::elevanlabs_models::SCRIBE_V1);
 
     // Test that builder methods are chainable

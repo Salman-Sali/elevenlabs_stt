@@ -6,24 +6,28 @@
 //!
 //! ```rust,no_run
 //! use elevenlabs_stt::ElevenLabsSTTClient;
+//! use std::path::Path;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let client = ElevenLabsSTTClient::new("your-api-key");
 //!
-//!     let file_path = "inputs/speech.mp3";
-//!     let file_content = std::fs::read(file_path)?;
-//!     
-//!     let stt_reponse = client.speech_to_text(file_content).execute().await?;
-//!     
+//!     let file_path = Path::new("inputs/speech.mp3");
+//!
+//!     let stt_reponse = client.speech_to_text(file_path).execute().await?;
+//!
 //!     println!("Transcription: {:?}", stt_reponse.text);
 //!     Ok(())
 //! }
 //! ```
 
 use reqwest::Client;
+use tokio::fs::File;
+use tokio_util::codec::{BytesCodec, FramedRead};
 
 pub mod error;
+
+pub use types::STTInput;
 pub mod models;
 pub mod types;
 
@@ -58,8 +62,39 @@ impl ElevenLabsSTTClient {
     }
 
     /// Start building a speech-to-text request
-    pub fn speech_to_text<F: Into<Option<Vec<u8>>>>(&self, file: F) -> SpeechToTextBuilder {
-        SpeechToTextBuilder::new(self.clone(), file.into())
+    ///
+    /// Accepts an [`STTInput`] which can be created from:
+    /// - `Vec<u8>` or `&[u8]` - loads file bytes directly into memory
+    /// - `&str`, `String`, `Path`, or `PathBuf` - streams file from disk (memory efficient for large files)
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use elevenlabs_stt::{ElevenLabsSTTClient, STTInput};
+    ///
+    /// let client = ElevenLabsSTTClient::new("your-api-key");
+    ///
+    /// // From bytes (original behavior)
+    /// let file_bytes = std::fs::read("audio.mp3").unwrap();
+    /// let builder = client.speech_to_text(STTInput::from(file_bytes));
+    ///
+    /// // From path (streaming, memory efficient)
+    /// let builder = client.speech_to_text("audio.mp3");
+    /// ```
+    ///
+    /// For using a cloud storage URL instead, use [`Self::speech_to_text_from_url`].
+    pub fn speech_to_text<I: Into<STTInput>>(&self, file: I) -> SpeechToTextBuilder {
+        SpeechToTextBuilder::new(self.clone(), Some(file.into()), None)
+    }
+
+    /// Start building a speech-to-text request with a cloud storage URL
+    ///
+    /// The HTTPS URL of the file to transcribe. The file must be accessible via HTTPS
+    /// and the file size must be less than 2GB.
+    ///
+    /// For using a local file instead, use [`Self::speech_to_text`].
+    pub fn speech_to_text_from_url<S: Into<String>>(&self, url: S) -> SpeechToTextBuilder {
+        SpeechToTextBuilder::new(self.clone(), None, Some(url.into()))
     }
 
     /// Internal method to execute STT request
@@ -69,16 +104,31 @@ impl ElevenLabsSTTClient {
     ) -> Result<STTResponse, ElevenLabsSTTError> {
         let mut form = reqwest::multipart::Form::new().text("model_id", request.model_id);
 
-        if let Some(file_data) = request.file {
-            let part = reqwest::multipart::Part::bytes(file_data)
-                .file_name("file")
-                .mime_str("application/octet-stream")
-                .map_err(|e| ElevenLabsSTTError::RequestError(e));
+        if let Some(file_input) = request.file {
+            let part = match file_input {
+                STTInput::Bytes(bytes) => reqwest::multipart::Part::bytes(bytes)
+                    .file_name("file")
+                    .mime_str("application/octet-stream")
+                    .map_err(ElevenLabsSTTError::RequestError)?,
+                STTInput::Path(file_path) => {
+                    let file = File::open(&file_path).await?;
 
-            match part {
-                Ok(part) => form = form.part("file", part),
-                Err(e) => return Err(e),
-            }
+                    let file_name = file_path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "file".to_string());
+
+                    let stream = FramedRead::new(file, BytesCodec::new());
+                    let body = reqwest::Body::wrap_stream(stream);
+
+                    reqwest::multipart::Part::stream(body)
+                        .file_name(file_name)
+                        .mime_str("application/octet-stream")
+                        .map_err(ElevenLabsSTTError::RequestError)?
+                }
+            };
+
+            form = form.part("file", part);
         }
 
         let request_fields = vec![
@@ -146,7 +196,7 @@ impl ElevenLabsSTTClient {
 
 pub struct SpeechToTextBuilder {
     client: ElevenLabsSTTClient,
-    file: Option<Vec<u8>>,
+    file: Option<STTInput>,
     model_id: Option<String>,
     language_code: Option<String>,
     tag_audio_events: Option<bool>,
@@ -164,7 +214,11 @@ pub struct SpeechToTextBuilder {
 }
 
 impl SpeechToTextBuilder {
-    fn new(client: ElevenLabsSTTClient, file: Option<Vec<u8>>) -> Self {
+    fn new(
+        client: ElevenLabsSTTClient,
+        file: Option<STTInput>,
+        cloud_storage_url: Option<String>,
+    ) -> Self {
         Self {
             client,
             file,
@@ -175,7 +229,7 @@ impl SpeechToTextBuilder {
             timestamps_granularity: None,
             diarize: None,
             diarization_threshold: None,
-            cloud_storage_url: None,
+            cloud_storage_url,
             webhook: None,
             webhook_id: None,
             temperature: None,
@@ -224,12 +278,6 @@ impl SpeechToTextBuilder {
     /// Set the diarization threshold to use
     pub fn diarization_threshold<F: Into<f32>>(mut self, diarization_threshold: F) -> Self {
         self.diarization_threshold = Some(diarization_threshold.into());
-        self
-    }
-
-    /// Set the cloud storage url to use
-    pub fn cloud_storage_url<S: Into<String>>(mut self, cloud_storage_url: S) -> Self {
-        self.cloud_storage_url = Some(cloud_storage_url.into());
         self
     }
 
@@ -309,11 +357,46 @@ mod tests {
     fn test_builder_pattern() {
         let client = ElevenLabsSTTClient::new("test-key");
         let builder = client
-            .speech_to_text(None)
+            .speech_to_text("test.mp3")
             .model(models::elevanlabs_models::SCRIBE_V1);
 
         // Builder pattern works
-        assert_eq!(builder.file, None);
+        assert!(builder.file.is_some());
+        assert_eq!(
+            builder.model_id,
+            Some(models::elevanlabs_models::SCRIBE_V1.to_string())
+        );
+    }
+
+    #[test]
+    fn test_builder_pattern_from_url() {
+        let client = ElevenLabsSTTClient::new("test-key");
+        let builder = client
+            .speech_to_text_from_url("https://example.com/audio.mp3")
+            .model(models::elevanlabs_models::SCRIBE_V1);
+
+        // Builder pattern works
+        assert!(builder.file.is_none());
+        assert_eq!(
+            builder.cloud_storage_url,
+            Some("https://example.com/audio.mp3".to_string())
+        );
+        assert_eq!(
+            builder.model_id,
+            Some(models::elevanlabs_models::SCRIBE_V1.to_string())
+        );
+    }
+
+    #[test]
+    fn test_builder_pattern_from_bytes() {
+        let client = ElevenLabsSTTClient::new("test-key");
+        let file_bytes = vec![0u8, 1, 2, 3, 4];
+        let builder = client
+            .speech_to_text(file_bytes)
+            .model(models::elevanlabs_models::SCRIBE_V1);
+
+        // Builder pattern works with bytes
+        assert!(builder.file.is_some());
         assert_eq!(
             builder.model_id,
             Some(models::elevanlabs_models::SCRIBE_V1.to_string())

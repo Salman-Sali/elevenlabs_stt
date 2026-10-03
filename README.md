@@ -12,6 +12,7 @@ A type-safe, async Rust client for the [ElevenLabs Speech-to-Text API](https://e
 - **Builder Pattern**: Intuitive, chainable API for configuring STT requests
 - **Model Support**: Full support for ElevenLabs models (`models::elevenlabs_models::*`)
 - **Customizable**: Elevanlabs STT APIs, custom base URLs, and enterprise support
+- **Memory Efficient**: Streams large files (up to 3.0GB) from disk without loading into memory
 - **Tokio Ready**: Works seamlessly with the Tokio runtime
 - **Audio & Video**: Works with audios and videos, up to 3.0GB
 
@@ -40,17 +41,37 @@ elevenlabs_stt = "0.0.5"
 
 ## Quick Start
 
+### From File Path (Memory Efficient)
+
 ```rust
-use elevenlabs_stt::{ElevenLabsSTTClient, STTResponse};
+use elevenlabs_stt::ElevenLabsSTTClient;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = ElevenLabsSTTClient::new("your-api-key");
 
     let file_path = "inputs/speech.mp3";
-    let file_content = std::fs::read(file_path)?;
 
-    let stt_reponse: STTResponse = client.speech_to_text(file_content).execute().await?;
+    let stt_reponse = client.speech_to_text(file_path).execute().await?;
+
+    println!("Results: {:?}", stt_reponse);
+    Ok(())
+}
+```
+
+### From Bytes (In Memory)
+
+```rust
+use elevenlabs_stt::ElevenLabsSTTClient;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = ElevenLabsSTTClient::new("your-api-key");
+
+    // Load file bytes yourself
+    let file_bytes = std::fs::read("inputs/speech.mp3")?;
+
+    let stt_reponse = client.speech_to_text(file_bytes).execute().await?;
 
     println!("Results: {:?}", stt_reponse);
     Ok(())
@@ -62,7 +83,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ### Basic Usage
 
 ```rust
-use elevenlabs_stt::{ElevenLabsSTTClient, STTResponse, models, voices};
+use elevenlabs_stt::ElevenLabsSTTClient;
 use std::env;
 
 #[tokio::main]
@@ -73,9 +94,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = ElevenLabsSTTClient::new(api_key);
 
     let file_path = "inputs/speech.mp3";
-    let file_content = std::fs::read(file_path)?;
 
-    let stt_reponse: STTResponse = client.speech_to_text(file_content).execute().await?;
+    let stt_reponse = client.speech_to_text(file_path).execute().await?;
     println!("Results: {:?}", stt_reponse);
     Ok(())
 }
@@ -84,7 +104,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ### Advanced Configuration
 
 ```rust
-use elevenlabs_stt::{ElevenLabsSTTClient, STTResponse, models, voices};
+use elevenlabs_stt::{ElevenLabsSTTClient, models};
 use std::env;
 
 #[tokio::main]
@@ -95,17 +115,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = ElevenLabsSTTClient::new(api_key);
 
     let file_path = "inputs/speech.mp3";
-    let file_content = std::fs::read(file_path)?;
 
-    let stt_reponse: STTResponse = client
-        .speech_to_text(file_content)
+    let stt_reponse = client
+        .speech_to_text(file_path)
         .model(models::elevanlabs_models::SCRIBE_V1)
         .language_code("en")
         .tag_audio_events(true)
         .timestamps_granularity("word")
         .diarize(true)
         .diarization_threshold(0.22)
-        .webhook(false)
         .webhook(false)
         .temperature(0.2)
         .seed(4000)
@@ -134,25 +152,26 @@ cargo run --example advanced_stt
 
 ## API Overview
 
-| Method                             | Description                                                                         |
-| ---------------------------------- | ----------------------------------------------------------------------------------- |
-| `ElevenLabsSTTClient::new(String)` | Create client instance (required)\*                                                 |
-| `.speech_to_text(Option<Vec<u8>>)` | Build a STT request, (File or `cloud_storage_url`) (required)\*                     |
-| `.model(String)`                   | Select model (optional)                                                             |
-| `.language_code(String)`           | Force language pronounce/accent only (no translation) (optional)                    |
-| `.tag_audio_events(bool)`          | Tag audio events like (laughter), (footsteps), etc. (optional)                      |
-| `.num_speakers(u32)`               | The max amount of speakers talking in the uploaded file. (optional)                 |
-| `.timestamps_granularity(String)`  | Allowed values: none, word, character. Defaults to word. (optional)                 |
-| `.diarize(bool)`                   | Which speaker is currently talking in the uploaded file. (optional)                 |
-| `.diarization_threshold(f32)`      | Can only be set when diarize=True and num_speakers=None. (optional)                 |
-| `.cloud_storage_url(String)`       | URL of the file to transcribe, if this is None, you must provide `file`. (optional) |
-| `.webhook(bool)`                   | Send the transcription result to configured speech-to-text webhooks. (optional)     |
-| `.webhook_id(String)`              | Optional specific webhook ID to send the transcription result to. (optional)        |
-| `.temperature(f32)`                | Controls the randomness of the transcription output, between 0.0 and 2.0 (optional) |
-| `.seed(u32)`                       | Our system will make a best effort to sample deterministically (optional)           |
-| `.use_multi_channel(bool)`         | Whether the audio file contains multiple channels (optional)                        |
-| `.webhook_metadata(String)`        | Optional metadata to be included in the webhook response (optional)                 |
-| `.execute()`                       | Run request → transcribe file (required)\*                                          |
+| Method                                          | Description                                                                         |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `ElevenLabsSTTClient::new(String)`              | Create client instance (required)*                                                  |
+| `.speech_to_text(path)`                         | Build a STT request with a file path (streaming, memory efficient)                  |
+| `.speech_to_text(bytes)`                        | Build a STT request with file bytes (original behavior)                             |
+| `.speech_to_text_from_url(url)`                 | Build a STT request with a cloud storage URL                                        |
+| `.model(String)`                                | Select model (optional)                                                             |
+| `.language_code(String)`                        | Force language pronounce/accent only (no translation) (optional)                    |
+| `.tag_audio_events(bool)`                       | Tag audio events like (laughter), (footsteps), etc. (optional)                      |
+| `.num_speakers(u32)`                            | The max amount of speakers talking in the uploaded file. (optional)                 |
+| `.timestamps_granularity(String)`               | Allowed values: none, word, character. Defaults to word. (optional)                 |
+| `.diarize(bool)`                                | Which speaker is currently talking in the uploaded file. (optional)                 |
+| `.diarization_threshold(f32)`                   | Can only be set when diarize=True and num_speakers=None. (optional)                 |
+| `.webhook(bool)`                                | Send the transcription result to configured speech-to-text webhooks. (optional)     |
+| `.webhook_id(String)`                           | Optional specific webhook ID to send the transcription result to. (optional)        |
+| `.temperature(f32)`                             | Controls the randomness of the transcription output, between 0.0 and 2.0 (optional) |
+| `.seed(u32)`                                    | Our system will make a best effort to sample deterministically (optional)           |
+| `.use_multi_channel(bool)`                      | Whether the audio file contains multiple channels (optional)                        |
+| `.webhook_metadata(String)`                     | Optional metadata to be included in the webhook response (optional)                 |
+| `.execute()`                                    | Run request → transcribe file (required)*                                           |
 
 ## Error Handling
 

@@ -3,6 +3,9 @@ use std::fmt;
 /// All possible errors that can occur when using the ElevenLabs API
 #[derive(Debug)]
 pub enum ElevenLabsSTTError {
+    /// IO error (file not found, permission denied, etc.)
+    IoError(std::io::Error),
+
     /// HTTP request failed (network issues, timeout, etc.)
     RequestError(reqwest::Error),
 
@@ -31,6 +34,7 @@ pub enum ElevenLabsSTTError {
 impl fmt::Display for ElevenLabsSTTError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            ElevenLabsSTTError::IoError(e) => write!(f, "IO error: {}", e),
             ElevenLabsSTTError::RequestError(e) => write!(f, "Request failed: {}", e),
             ElevenLabsSTTError::ApiError { status, message } => {
                 write!(f, "API error ({}): {}", status, message)
@@ -59,10 +63,17 @@ impl fmt::Display for ElevenLabsSTTError {
 impl std::error::Error for ElevenLabsSTTError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            ElevenLabsSTTError::IoError(e) => Some(e),
             ElevenLabsSTTError::RequestError(e) => Some(e),
             ElevenLabsSTTError::ParseError(e) => Some(e),
             _ => None,
         }
+    }
+}
+
+impl From<std::io::Error> for ElevenLabsSTTError {
+    fn from(error: std::io::Error) -> Self {
+        ElevenLabsSTTError::IoError(error)
     }
 }
 

@@ -1,4 +1,50 @@
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+
+/// Input type for speech-to-text requests
+#[derive(Debug, Clone)]
+pub enum STTInput {
+    /// Load file from bytes in memory
+    Bytes(Vec<u8>),
+    /// Stream file from disk path (memory efficient for large files)
+    Path(PathBuf),
+}
+
+impl From<Vec<u8>> for STTInput {
+    fn from(bytes: Vec<u8>) -> Self {
+        STTInput::Bytes(bytes)
+    }
+}
+
+impl From<&[u8]> for STTInput {
+    fn from(bytes: &[u8]) -> Self {
+        STTInput::Bytes(bytes.to_vec())
+    }
+}
+
+impl From<PathBuf> for STTInput {
+    fn from(path: PathBuf) -> Self {
+        STTInput::Path(path)
+    }
+}
+
+impl From<&std::path::Path> for STTInput {
+    fn from(path: &std::path::Path) -> Self {
+        STTInput::Path(path.to_path_buf())
+    }
+}
+
+impl From<&str> for STTInput {
+    fn from(path: &str) -> Self {
+        STTInput::Path(PathBuf::from(path))
+    }
+}
+
+impl From<String> for STTInput {
+    fn from(path: String) -> Self {
+        STTInput::Path(PathBuf::from(path))
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct STTRequest {
@@ -6,7 +52,8 @@ pub struct STTRequest {
     // Exactly one of the `file` or `cloud_storage_url` parameters must be provided.
     // The file size must be less than 3.0GB.
     // If this is None, you must provide `cloud_storage_url`.
-    pub file: Option<Vec<u8>>,
+    #[serde(skip)]
+    pub file: Option<STTInput>,
 
     // The ID of the model to use for transcription.
     // Currently only `scribe_v1` and `scribe_v1_experimental` are available.
